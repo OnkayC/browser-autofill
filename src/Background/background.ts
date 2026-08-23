@@ -45,7 +45,7 @@ browser.commands.onCommand.addListener(command => {
   }
 
   if (command == 'open-inline-menu') {
-    BackgroundManager.getInstance().openInlineMenu();
+    BackgroundManager.getInstance().openInlineMenu(true);
   }
 });
 

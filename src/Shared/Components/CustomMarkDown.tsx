@@ -19,7 +19,7 @@ interface Props {
 function CustomMarkDown(props: Props) {
   const { text, onRedirectUrl } = props;
   const { darkMode } = useCustomStyle();
-  const [style, setStyle] = useState();
+  const [style, setStyle] = useState<Record<string, React.CSSProperties>>();
 
   const onMarkdownClick = (event: any) => {
     event.preventDefault();

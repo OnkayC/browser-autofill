@@ -22,6 +22,7 @@ import { GeneratePasswordV2Response } from '../Messaging/Protocol/GeneratePasswo
 import { GetPasswordAndStrengthRequest } from '../Messaging/Protocol/GetPasswordAndStrengthRequest';
 import { GetPasswordAndStrengthResponse } from '../Messaging/Protocol/GetPasswordAndStrengthResponse';
 import { GetNewEntryDefaultsResponseV2 } from '../Messaging/Protocol/GetNewEntryDefaultsResponseV2';
+import { IframeChannelRegistry } from './IframeChannelRegistry';
 
 export class BackgroundManager {
   private static instance: BackgroundManager;
@@ -368,6 +369,10 @@ export class BackgroundManager {
 
 
       return response;
+    } else if (message.type === 'register-iframe-channel') {
+      return IframeChannelRegistry.register(message.details?.token, sender);
+    } else if (message.type === 'claim-iframe-channel') {
+      return IframeChannelRegistry.claim(message.details?.token, sender);
     } else if (message.type === 'content-script-requests-url-launch') {
       const url = message.details;
       const response = await browser.tabs.create({ url: url });
@@ -559,7 +564,7 @@ export class BackgroundManager {
     await browser.tabs.sendMessage(tab.id, { restoreFocus: true });
   }
 
-  async openInlineMenu(): Promise<void> {
+  async openInlineMenu(force = false): Promise<void> {
     const settings = await SettingsStore.getSettings();
     const tab = await BackgroundManager.getCurrentTab();
 
@@ -567,7 +572,7 @@ export class BackgroundManager {
       return;
     }
 
-    if (!settings.showInlineIconAndPopupMenu) {
+    if (!force && !settings.showInlineIconAndPopupMenu) {
       return;
     }
 

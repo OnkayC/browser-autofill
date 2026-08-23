@@ -11,7 +11,8 @@
     "lint": "eslint . --ext .ts",
     "prettier": "prettier --write './**/*.{js,ts,tsx,html}'",
     "zip": "node release-zip-files.js",
-    "release": "node release-update-version.js"
+    "release": "node release-update-version.js",
+    "test": "node --test tests/*.test.mjs"
   },
   "author": "Mark McGuill",
   "license": "AGPL-3.0-or-later",
@@ -19,6 +20,7 @@
     "@types/lodash.debounce": "^4.0.7",
     "@types/react": "^18.0.17",
     "@types/react-dom": "^18.0.6",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@types/webextension-polyfill": "^0.9.0",
     "@typescript-eslint/eslint-plugin": "^5.53.0",
     "@typescript-eslint/parser": "^5.53.0",

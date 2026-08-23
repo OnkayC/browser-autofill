@@ -1,12 +1,11 @@
 import browser from 'webextension-polyfill';
 import { ContentScriptManager, MainPageInformation } from '../ContentScriptManager';
-import { Utils } from '../../Utils';
 import { SettingsStore } from '../../Settings/SettingsStore';
 
 export enum IframeComponentTypes {
   InlineMiniFieldMenu,
   CreateNewEntryDialog,
-  NotificationToast,
+  NotificationToast
 }
 
 export enum IframeMessageTypes {
@@ -23,7 +22,7 @@ export enum IframeMessageTypes {
   colorSchemeChanged,
   onRedirectUrl,
   onCopy,
-  showLargeTextView,
+  showLargeTextView
 }
 
 export class IframeManager {
@@ -34,6 +33,8 @@ export class IframeManager {
   isPasswordField: boolean;
   areMainPageEventListenersAdded = false;
   notificationToastMessage = '';
+  private iframeMessageChannel: MessageChannel | null = null;
+  private creationGeneration = 0;
 
   constructor(contentScriptManager: ContentScriptManager) {
     this.contentScriptManager = contentScriptManager;
@@ -45,201 +46,242 @@ export class IframeManager {
     this.isPasswordField = isPasswordField;
     this.notificationToastMessage = notificationToastMessage;
 
-    
     this.remove();
+    const generation = this.creationGeneration;
 
-    
     requestAnimationFrame(() => {
-      this.create();
+      void this.create(generation).catch(() => {
+        if (generation === this.creationGeneration) {
+          this.remove();
+        }
+      });
     });
   }
 
-  private create() {
+  private async create(generation: number) {
+    const channelToken = this.createChannelToken();
+    const channelRegistered = await browser.runtime.sendMessage({
+      type: 'register-iframe-channel',
+      details: { token: channelToken }
+    });
+
+    if (!channelRegistered || generation !== this.creationGeneration) {
+      return;
+    }
+
     const existRoot = document.querySelector('com-strongbox-extension');
+    if (existRoot) {
+      return;
+    }
 
-    if (!existRoot) {
-      
-      const mainRoot = document.createElement('com-strongbox-extension');
-      const iframeShadowContainer = mainRoot.attachShadow({ mode: 'open' });
-      this.iframe = document.createElement('iframe');
+    const mainRoot = document.createElement('com-strongbox-extension');
+    const iframeShadowContainer = mainRoot.attachShadow({ mode: 'closed' });
+    this.iframe = document.createElement('iframe');
 
-      
-      if (!Utils.isFirefox()) {
-        this.iframe.setAttribute('sandbox', 'allow-scripts'); 
+    this.iframe.src = browser.runtime.getURL('iframe.html');
+    iframeShadowContainer.appendChild(this.iframe);
+    document.body.append(mainRoot);
+    this.defineStyle();
+
+    const onMainPageScrolled = () => {
+      if (this.iframeComponentType == IframeComponentTypes.InlineMiniFieldMenu) {
+        this.positionInlineMenu();
+      }
+    };
+
+    const onMainPageResized = () => {
+      if (this.iframeComponentType == IframeComponentTypes.InlineMiniFieldMenu) {
+        this.prepareInlineMenuTruncated(this.anchorEl.getBoundingClientRect());
+        this.positionInlineMenu();
+      }
+    };
+
+    const handleMessageReceivedFromIFrame = async (event: MessageEvent) => {
+      if (typeof event.data !== 'object' || event.data === null || typeof event.data.type !== 'number') {
+        return;
       }
 
-      this.iframe.src = browser.runtime.getURL('iframe.html');
-
-      
-      iframeShadowContainer.appendChild(this.iframe);
-      document.body.append(mainRoot);
-
-      
-      this.defineStyle();
-
-      
-
-      const onMainPageScrolled = () => {
-        if (this.iframeComponentType == IframeComponentTypes.InlineMiniFieldMenu) {
-          const inputRect = this.anchorEl.getBoundingClientRect();
-          this.iframe.style.top = inputRect.bottom + 'px';
-          this.iframe.style.left = inputRect.left + 'px';
-        }
-      };
-
-      const onMessageReceivedFromIFrame = async (event: MessageEvent) => {
-        switch (event.data.type) {
-          case IframeMessageTypes.remove: {
-            this.remove();
-            break;
-          }
-          case IframeMessageTypes.resize: {
-            this.iframe.style.width = event.data.data.width;
-            this.iframe.style.height = event.data.data.height;
-            break;
-          }
-          case IframeMessageTypes.backToInlineMiniFieldMenu: {
-            this.initialize(IframeComponentTypes.InlineMiniFieldMenu, this.anchorEl);
-            break;
-          }
-          case IframeMessageTypes.onFillWithCredential: {
-
-            const credential = event.data.data;
-            await this.contentScriptManager.onFillWithCredential(credential, this.anchorEl, this.isPasswordField);
-            this.remove();
-            break;
-          }
-          case IframeMessageTypes.onFillSingleField: {
-
-            const text = event.data.data.text;
-            const appendValue = event.data.data.appendValue ?? false;
-            await this.contentScriptManager.onFillSingleField(text, this.anchorEl, appendValue);
-
-            if (!appendValue) {
-              this.remove();
-            }
-            break;
-          }
-          case IframeMessageTypes.onCreatedNewItem: {
-            this.contentScriptManager.onCreatedNewItem(event.data.data.credential, event.data.data.message);
-            this.remove();
-            break;
-          }
-          case IframeMessageTypes.showCreateNewEntryDialog: {
-            this.initialize(IframeComponentTypes.CreateNewEntryDialog, this.anchorEl);
-            break;
-          }
-          case IframeMessageTypes.showNotificationToast: {
-            this.initialize(IframeComponentTypes.NotificationToast, this.anchorEl, false, event.data.data);
-            break;
-          }
-          case IframeMessageTypes.hideInlineMenusForAWhile: {
-            this.contentScriptManager.hideInlineMenusForAWhile = true;
-            break;
-          }
-          case IframeMessageTypes.showLargeTextView: {
-            this.contentScriptManager.showLargeTextView = true;
-            break;
-          }
-          case IframeMessageTypes.colorSchemeChanged: {
-            this.iframe.style.colorScheme = event.data.data;
-
-            break;
-          }
-          case IframeMessageTypes.onRedirectUrl: {
-            const url = event.data.data;
-            await this.contentScriptManager.onLaunchUrl(url);
-            break;
-          }
-          case IframeMessageTypes.onCopy: {
-            const text = event.data.data;
-            await this.contentScriptManager.onCopy(text);
-            break;
-          }
-          default:
-            break;
-        }
-      };
-
-      const onMainPageClickPressed = (event: Event) => {
-        setTimeout(() => {
-          const clickedElement = event.target as HTMLElement;
-
-          
-          let siblings: Array<Element> = [];
-          if (clickedElement.parentElement) {
-            siblings = Array.from(clickedElement.parentElement.children);
-          }
-
-          if (!siblings.includes(this.contentScriptManager.currentInlineMenuInputElement as Element)) {
-            this.remove();
-          }
-        }, 100); 
-      };
-
-      const onMainPageKeyup = (event: KeyboardEvent) => {
-        if (event.key === 'Escape' || (event.key === 'Tab' && this.anchorEl != document.activeElement)) {
+      switch (event.data.type) {
+        case IframeMessageTypes.remove: {
           this.remove();
-        } else if (event.key === 'ArrowDown') {
-          this.iframe.focus();
+          break;
         }
-      };
+        case IframeMessageTypes.resize: {
+          const width = event.data.data.width;
+          const height = event.data.data.height;
+          this.iframe.style.width = width;
+          this.iframe.style.height = height;
 
-      const onIFrameLoaded = async () => {
-        const stored = await SettingsStore.getSettings();
-        const url = await this.contentScriptManager.getFavIconUrl();
-        const favIconBase64 = url ? await this.contentScriptManager.getFavIconBase64Data(url) : null;
-        const isDefaultFavIcon = favIconBase64 == null;
-        const favIconUrl: string | null = isDefaultFavIcon ? null : url;
-        const inlineMenuTruncatedHeight = this.iframe.getAttribute('inline-menu-truncated-height') ?? null;
-
-        const mainPageInformation: MainPageInformation = {
-          title: document.title,
-          url: document.location.href,
-          favIconBase64,
-          favIconUrl,
-          inlineMenuTruncatedHeight,
-        };
-
-        switch (this.iframeComponentType) {
-          case IframeComponentTypes.InlineMiniFieldMenu:
-          case IframeComponentTypes.CreateNewEntryDialog: {
-            this.iframe.contentWindow?.postMessage(
-              {
-                type: IframeMessageTypes.render,
-                data: { iframeComponentType: this.iframeComponentType, mainPageInformation, showScrollbars: stored.showScrollbars },
-              },
-              '*'
-            );
-            break;
+          if (this.iframeComponentType == IframeComponentTypes.InlineMiniFieldMenu) {
+            this.positionInlineMenu(width, height);
           }
-          case IframeComponentTypes.NotificationToast: {
-            this.iframe.contentWindow?.postMessage(
-              {
-                type: IframeMessageTypes.render,
-                data: { iframeComponentType: this.iframeComponentType, message: this.notificationToastMessage },
-              },
-              '*'
-            );
-            break;
-          }
-          default:
-            break;
+          break;
         }
-      };
+        case IframeMessageTypes.backToInlineMiniFieldMenu: {
+          this.initialize(IframeComponentTypes.InlineMiniFieldMenu, this.anchorEl, this.isPasswordField);
+          break;
+        }
+        case IframeMessageTypes.onFillWithCredential: {
+          const credential = event.data.data;
+          await this.contentScriptManager.onFillWithCredential(credential, this.anchorEl, this.isPasswordField);
+          this.remove();
+          break;
+        }
+        case IframeMessageTypes.onFillSingleField: {
+          const text = event.data.data.text;
+          const appendValue = event.data.data.appendValue ?? false;
+          await this.contentScriptManager.onFillSingleField(text, this.anchorEl, appendValue);
 
-      
-      this.iframe.addEventListener('load', onIFrameLoaded);
-
-      
-      if (!this.areMainPageEventListenersAdded) {
-        window.addEventListener('scroll', onMainPageScrolled);
-        window.addEventListener('message', onMessageReceivedFromIFrame);
-        window.addEventListener('click', onMainPageClickPressed);
-        window.addEventListener('keyup', onMainPageKeyup);
-
-        this.areMainPageEventListenersAdded = true;
+          if (!appendValue) {
+            this.remove();
+          }
+          break;
+        }
+        case IframeMessageTypes.onCreatedNewItem: {
+          this.contentScriptManager.onCreatedNewItem(event.data.data.credential, event.data.data.message);
+          this.remove();
+          break;
+        }
+        case IframeMessageTypes.showCreateNewEntryDialog: {
+          this.initialize(IframeComponentTypes.CreateNewEntryDialog, this.anchorEl);
+          break;
+        }
+        case IframeMessageTypes.showNotificationToast: {
+          this.initialize(IframeComponentTypes.NotificationToast, this.anchorEl, false, event.data.data);
+          break;
+        }
+        case IframeMessageTypes.hideInlineMenusForAWhile: {
+          this.contentScriptManager.hideInlineMenusForAWhile = true;
+          break;
+        }
+        case IframeMessageTypes.showLargeTextView: {
+          this.contentScriptManager.showLargeTextView = true;
+          break;
+        }
+        case IframeMessageTypes.colorSchemeChanged: {
+          this.iframe.style.colorScheme = event.data.data;
+          break;
+        }
+        case IframeMessageTypes.onRedirectUrl: {
+          const url = event.data.data;
+          await this.contentScriptManager.onLaunchUrl(url);
+          break;
+        }
+        case IframeMessageTypes.onCopy: {
+          const text = event.data.data;
+          await this.contentScriptManager.onCopy(text);
+          break;
+        }
+        default:
+          break;
       }
+    };
+
+    const messageChannel = new MessageChannel();
+    let channelTransferred = false;
+    this.iframeMessageChannel = messageChannel;
+    messageChannel.port1.addEventListener('message', (event) => {
+      void handleMessageReceivedFromIFrame(event);
+    });
+    messageChannel.port1.start();
+
+    const onMainPageClickPressed = (event: Event) => {
+      setTimeout(() => {
+        const clickedElement = event.target as HTMLElement;
+        let siblings: Array<Element> = [];
+        if (clickedElement.parentElement) {
+          siblings = Array.from(clickedElement.parentElement.children);
+        }
+
+        if (!siblings.includes(this.contentScriptManager.currentInlineMenuInputElement as Element)) {
+          this.remove();
+        }
+      }, 100);
+    };
+
+    const onMainPageKeyup = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || (event.key === 'Tab' && this.anchorEl != document.activeElement)) {
+        this.remove();
+      } else if (event.key === 'ArrowDown') {
+        this.iframe.focus();
+      }
+    };
+
+    const onIFrameLoaded = async () => {
+      if (generation !== this.creationGeneration || this.iframeMessageChannel !== messageChannel || channelTransferred) {
+        return;
+      }
+
+      const stored = await SettingsStore.getSettings();
+      const url = await this.contentScriptManager.getFavIconUrl();
+      const favIconBase64 = url ? await this.contentScriptManager.getFavIconBase64Data(url) : null;
+      const isDefaultFavIcon = favIconBase64 == null;
+      const favIconUrl: string | null = isDefaultFavIcon ? null : url;
+      const inlineMenuTruncatedHeight = this.iframe.getAttribute('inline-menu-truncated-height') ?? null;
+
+      const mainPageInformation: MainPageInformation = {
+        title: document.title,
+        url: document.location.href,
+        favIconBase64,
+        favIconUrl,
+        inlineMenuTruncatedHeight
+      };
+
+      if (generation !== this.creationGeneration || this.iframeMessageChannel !== messageChannel || channelTransferred) {
+        return;
+      }
+
+      channelTransferred = true;
+      const targetOrigin = new URL(this.iframe.src).origin;
+
+      switch (this.iframeComponentType) {
+        case IframeComponentTypes.InlineMiniFieldMenu:
+        case IframeComponentTypes.CreateNewEntryDialog: {
+          this.iframe.contentWindow?.postMessage(
+            {
+              type: IframeMessageTypes.render,
+              data: {
+                iframeComponentType: this.iframeComponentType,
+                mainPageInformation,
+                showScrollbars: stored.showScrollbars,
+                channelToken
+              }
+            },
+            targetOrigin,
+            [messageChannel.port2]
+          );
+          break;
+        }
+        case IframeComponentTypes.NotificationToast: {
+          this.iframe.contentWindow?.postMessage(
+            {
+              type: IframeMessageTypes.render,
+              data: {
+                iframeComponentType: this.iframeComponentType,
+                message: this.notificationToastMessage,
+                channelToken
+              }
+            },
+            targetOrigin,
+            [messageChannel.port2]
+          );
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    this.iframe.addEventListener('load', () => {
+      void onIFrameLoaded();
+    });
+
+    if (!this.areMainPageEventListenersAdded) {
+      window.addEventListener('scroll', onMainPageScrolled, true);
+      window.addEventListener('resize', onMainPageResized);
+      window.addEventListener('click', onMainPageClickPressed);
+      window.addEventListener('keyup', onMainPageKeyup);
+      this.areMainPageEventListenersAdded = true;
     }
   }
 
@@ -250,8 +292,18 @@ export class IframeManager {
   }
 
   remove() {
+    this.creationGeneration += 1;
+    this.iframeMessageChannel?.port1.close();
+    this.iframeMessageChannel?.port2.close();
+    this.iframeMessageChannel = null;
+
     const existRoot = document.querySelector('com-strongbox-extension');
     existRoot?.remove();
+  }
+
+  private createChannelToken(): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
   private defineStyle() {
@@ -263,22 +315,21 @@ export class IframeManager {
     this.iframe.style.colorScheme = 'none';
     this.iframe.setAttribute('scrolling', 'no');
 
-    
-    const styleElement = document.createElement('style');
-    styleElement.innerHTML = `com-strongbox-extension {visibility: visible !important; /* Ensure visibility for Strongbox Extension  */}`;
-    document.head.appendChild(styleElement);
+    if (!document.getElementById('strongbox-extension-host-style')) {
+      const styleElement = document.createElement('style');
+      styleElement.id = 'strongbox-extension-host-style';
+      styleElement.textContent = 'com-strongbox-extension { visibility: visible !important; }';
+      document.head.appendChild(styleElement);
+    }
 
     switch (this.iframeComponentType) {
       case IframeComponentTypes.InlineMiniFieldMenu: {
         const inputRect = this.anchorEl.getBoundingClientRect();
-
         this.prepareInlineMenuTruncated(inputRect);
-
-        this.iframe.style.top = inputRect.bottom + 'px';
+        this.iframe.style.top = inputRect.bottom + 6 + 'px';
         this.iframe.style.left = inputRect.left + 'px';
         this.iframe.style.width = '0px';
         this.iframe.style.height = '0px';
-
         break;
       }
       case IframeComponentTypes.CreateNewEntryDialog: {
@@ -298,16 +349,33 @@ export class IframeManager {
   }
 
   prepareInlineMenuTruncated = (inputRect: DOMRect): void => {
-    const parent = document.body.getBoundingClientRect();
-    const widthForRenderMenu = parent.bottom - inputRect.bottom;
+    const margin = 8;
+    const gap = 6;
+    const availableBelow = Math.max(0, window.innerHeight - inputRect.bottom - gap - margin);
+    const availableAbove = Math.max(0, inputRect.top - gap - margin);
+    const available = Math.max(availableBelow, availableAbove);
 
-    const isTruncated = widthForRenderMenu >= 0 && widthForRenderMenu < 300;
-    if (isTruncated) {
-      if (widthForRenderMenu < 100) {
-        this.iframe.setAttribute('inline-menu-truncated-height', (widthForRenderMenu + 80).toString());
-      } else {
-        this.iframe.setAttribute('inline-menu-truncated-height', widthForRenderMenu.toString());
-      }
-    }
+    this.iframe.setAttribute('inline-menu-truncated-height', Math.floor(available).toString());
   };
+
+  private positionInlineMenu(widthCss?: string, heightCss?: string) {
+    if (!this.iframe || !this.anchorEl?.isConnected) {
+      return;
+    }
+
+    const margin = 8;
+    const gap = 6;
+    const inputRect = this.anchorEl.getBoundingClientRect();
+    const requestedWidth = Math.max(0, parseFloat(widthCss ?? this.iframe.style.width) || this.iframe.offsetWidth);
+    const requestedHeight = Math.max(0, parseFloat(heightCss ?? this.iframe.style.height) || this.iframe.offsetHeight);
+    const maxHeight = Math.max(0, window.innerHeight - margin * 2);
+    const height = Math.min(requestedHeight, maxHeight);
+    const availableBelow = window.innerHeight - inputRect.bottom - gap - margin;
+    const availableAbove = inputRect.top - gap - margin;
+    const top = availableBelow >= height || availableBelow >= availableAbove ? inputRect.bottom + gap : inputRect.top - gap - height;
+    const left = inputRect.left;
+
+    this.iframe.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - height - margin))}px`;
+    this.iframe.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - requestedWidth - margin))}px`;
+  }
 }

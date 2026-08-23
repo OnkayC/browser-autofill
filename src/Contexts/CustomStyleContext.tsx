@@ -7,6 +7,7 @@ import githubMarkdownDarkStyle from '../Shared/Styles/markdown-styles/github-mar
 import githubMarkdownLightStyle from '../Shared/Styles/markdown-styles/github-markdown-light';
 import { SizeHandler } from '../SizeHandler';
 import { StrongboxColours } from '../StrongboxColours';
+import { postToIframeParent } from '../Content/Iframe/IframeParentChannel';
 
 interface ThemeContextType {
   getCustomStyle: (components?: object | null) => object;
@@ -185,7 +186,7 @@ export function CustomStyleProvider({ children }: ThemeProviderProps) {
       const head = document.head || document.getElementsByTagName('head')[0];
       head.appendChild(metaTag);
 
-      parent.postMessage({ type: IframeMessageTypes.colorSchemeChanged, data: isDark ? 'dark' : 'light' }, '*');
+      postToIframeParent({ type: IframeMessageTypes.colorSchemeChanged, data: isDark ? 'dark' : 'light' });
     }
   };
 
