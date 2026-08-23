@@ -24,7 +24,7 @@ export class IconManager {
           },
         });
 
-        await action.setTitle({ title: 'Strongbox: Not Running' });
+        await action.setTitle({ title: 'Strongbox Onkay: Not Running' });
       } else if (state == IconState.allDatabasesLocked) {
         await action.setIcon({
           path: {
@@ -33,7 +33,7 @@ export class IconManager {
           },
         });
 
-        await action.setTitle({ title: 'Strongbox: Locked' });
+        await action.setTitle({ title: 'Strongbox Onkay: Locked' });
       } else {
         await action.setIcon({
           path: {
@@ -41,7 +41,7 @@ export class IconManager {
             38: '/assets/icons/app-icon-blue-38.png',
           },
         });
-        await action.setTitle({ title: 'Strongbox' });
+        await action.setTitle({ title: 'Strongbox Onkay' });
       }
 
       await action.setBadgeText({ text: badgeText });
