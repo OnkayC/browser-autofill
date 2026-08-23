@@ -4,6 +4,40 @@ Strongbox Browser AutoFill Extension official distributions can be found on the 
 - Chrome/Chromium: https://chrome.google.com/webstore/detail/strongbox-autofill/mnilpkfepdibngheginihjpknnopchbn
 - Firefox: https://addons.mozilla.org/firefox/addon/strongbox-autofill/
 
+## Onkay Firefox fork: native messaging
+
+The private Firefox fork uses extension ID `{1af7308a-5616-4c0d-a14f-14c69f4e0bcd}` and its own native messaging host name, `com.onkay.strongbox`. Keeping a separate host name avoids modifying the manifest managed by Strongbox and survives Strongbox rewriting its official `com.markmcguill.strongbox` manifest.
+
+Create the fork-specific Firefox native messaging manifest at:
+
+```text
+~/Library/Application Support/Mozilla/NativeMessagingHosts/com.onkay.strongbox.json
+```
+
+with this content:
+
+```json
+{
+  "allowed_extensions": [
+    "{1af7308a-5616-4c0d-a14f-14c69f4e0bcd}"
+  ],
+  "description": "Strongbox Browser AutoFill Extension - Onkay Fork",
+  "name": "com.onkay.strongbox",
+  "path": "/Applications/Strongbox.app/Contents/MacOS/afproxy",
+  "type": "stdio"
+}
+```
+
+The manifest deliberately points to Strongbox's existing `afproxy` executable; no Strongbox application files or signatures are modified. If Strongbox moves that executable in a future release, update only the `path` above.
+
+Do not edit or make Strongbox's official `com.markmcguill.strongbox.json` manifest immutable. If the earlier `uchg` workaround was applied, remove it once:
+
+```sh
+chflags nouchg "$HOME/Library/Application Support/Mozilla/NativeMessagingHosts/com.markmcguill.strongbox.json"
+```
+
+Strongbox may then manage its official manifest normally, while the fork continues using `com.onkay.strongbox.json`. Restart Firefox after creating or changing either native messaging manifest.
+
 # Localization - Help Wanted
 If you would like to see Strongbox translated into your language just get in touch (support@strongboxsafe.com) and we'll get you access to our localization platform. Localization and translation is managed through the parallel Babel project. This is managed under the MIT licence to avoid issues with the Apple's App Store and ownership:
 

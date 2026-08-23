@@ -16,7 +16,7 @@ export class NativeMessagingHelper {
     return NativeMessagingHelper.instance;
   }
 
-  private static AppId = 'com.markmcguill.strongbox';
+  private static AppId = 'com.onkay.strongbox';
 
   public async ping(message: unknown): Promise<AutoFillEncryptedResponse> {
     return browser.runtime.sendNativeMessage(NativeMessagingHelper.AppId, message);
