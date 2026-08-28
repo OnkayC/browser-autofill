@@ -7,6 +7,7 @@ import SettingsPopupStyleTabPanel from './SettingsPopupStyleTabPanel';
 import SettingsPopupGeneralTabPanel from './SettingsPopupGeneralTabPanel';
 import SettingsPopupFillTabPanel from './SettingsPopupFillTabPanel';
 import SettingsPopupInlineMenuTabPanel from './SettingsPopupInlineMenuTabPanel';
+import SettingsPopupRulesTabPanel from './SettingsPopupRulesTabPanel';
 
 function SettingsPopupComponent() {
   const { sizeHandler } = useCustomStyle();
@@ -28,7 +29,7 @@ function SettingsPopupComponent() {
                   variant="caption"
                   color="text.secondary"
                   sx={{
-                    textOverflow: 'ellipsis',
+                    textOverflow: 'ellipsis'
                   }}
                 >
                   {`${t('general.version')} ${process.env.VERSION}`}
@@ -37,7 +38,10 @@ function SettingsPopupComponent() {
             </Box>
           </ListSubheader>
         }
-        sx={{ minWidth: sizeHandler.getSettingsPopupListMinWidth(), minHeight: '150px' }}
+        sx={{
+          minWidth: sizeHandler.getSettingsPopupListMinWidth(),
+          minHeight: '150px'
+        }}
       >
         {!loading && <VerticalTabs />}
       </List>
@@ -55,7 +59,7 @@ interface TabPanelProps {
 function a11yProps(index: number) {
   return {
     id: `vertical-tab-${index}`,
-    'aria-controls': `vertical-tabpanel-${index}`,
+    'aria-controls': `vertical-tabpanel-${index}`
   };
 }
 
@@ -74,12 +78,14 @@ function VerticalTabs() {
         <Tab label={t('settings-popup-component.title-tab2')} {...a11yProps(1)} />
         <Tab label={t('settings-popup-component.title-tab3')} {...a11yProps(2)} />
         <Tab label={t('settings-popup-component.title-tab4')} {...a11yProps(3)} />
+        <Tab label={t('settings-popup-component.title-tab5')} {...a11yProps(4)} />
       </Tabs>
 
       <SettingsPopupGeneralTabPanel value={value} index={0} />
       <SettingsPopupFillTabPanel value={value} index={1} />
       <SettingsPopupInlineMenuTabPanel value={value} index={2} />
       <SettingsPopupStyleTabPanel value={value} index={3} />
+      <SettingsPopupRulesTabPanel value={value} index={4} />
     </Box>
   );
 }

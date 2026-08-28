@@ -23,17 +23,25 @@ import { GetPasswordAndStrengthRequest } from '../Messaging/Protocol/GetPassword
 import { GetPasswordAndStrengthResponse } from '../Messaging/Protocol/GetPasswordAndStrengthResponse';
 import { GetNewEntryDefaultsResponseV2 } from '../Messaging/Protocol/GetNewEntryDefaultsResponseV2';
 import { IframeChannelRegistry } from './IframeChannelRegistry';
+import { AutofillCoordinator } from './AutofillCoordinator';
+import { BrowserAutofillAdapter } from './BrowserAutofillAdapter';
+
+interface PendingPageLoadFill {
+  credential: AutoFillCredential;
+  expiresAt: number;
+  expirationTimer: ReturnType<typeof setTimeout> | null;
+}
 
 export class BackgroundManager {
   private static instance: BackgroundManager;
   private nativeAppApi = NativeAppApi.getInstance();
+  private readonly autofillCoordinator = new AutofillCoordinator(new BrowserAutofillAdapter());
+  private readonly pendingPageLoadFills = new Map<number, PendingPageLoadFill>();
   private static readonly strongboxReadyRetryDelayMs = 250;
   private static readonly strongboxReadyMaxAttempts = 20;
+  private static readonly pageLoadFillWindowMs = 2000;
 
-
-  private constructor() {
-    
-  }
+  private constructor() {}
 
   public static getInstance(): BackgroundManager {
     if (!BackgroundManager.instance) {
@@ -43,12 +51,7 @@ export class BackgroundManager {
     return BackgroundManager.instance;
   }
 
-  
-
-  
-
   public async doSimpleStatusUpdate(): Promise<void> {
-
     await this.getStatus();
   }
 
@@ -68,12 +71,10 @@ export class BackgroundManager {
     }
   }
 
-  
-
   static async getCurrentTab(): Promise<browser.Tabs.Tab | undefined> {
     const tabs = await browser.tabs.query({
       active: true,
-      currentWindow: true,
+      currentWindow: true
     });
 
     return tabs[0];
@@ -88,31 +89,20 @@ export class BackgroundManager {
     return tab ? tab.url : undefined;
   }
 
-  public async refreshCredentialsAndAutoFillIfNecessary(force = false, shouldAttemptAutoFill = false): Promise<void> {
+  public async refreshCredentialsAndAutoFillIfNecessary(force = false, shouldAttemptAutoFill = false, tabId?: number): Promise<void> {
     try {
-      const tab = await BackgroundManager.getCurrentTab();
+      const tab = tabId === undefined ? await BackgroundManager.getCurrentTab() : await browser.tabs.get(tabId);
       const url = tab?.url;
 
       if (!url || !tab) {
         return;
       }
 
-
-      if (
-        force ||
-        
-        shouldAttemptAutoFill
-      ) {
-        
-
-
+      if (force || shouldAttemptAutoFill) {
         const credentials = await this.checkForCredentialsUrl(url);
-
-        
 
         const tabID = tab.id;
         if (shouldAttemptAutoFill && tabID && credentials && credentials.length > 0) {
-
           const settings = await SettingsStore.getSettings();
 
           if ((tabID && settings.autoFillImmediatelyIfOnlyASingleMatch && credentials.length == 1) || settings.autoFillImmediatelyWithFirstMatch) {
@@ -122,19 +112,34 @@ export class BackgroundManager {
           }
         }
       }
-    } catch (error) {
-      
-      
-      
-    }
+    } catch (error) {}
   }
 
   public doOnLoadFill(tabID: number, credential: AutoFillCredential) {
-    this.fillWithCredential(tabID, credential, true);
+    this.rememberPageLoadFill(tabID, credential);
+    void this.fillWithCredential(tabID, credential, true).catch(() => undefined);
+  }
+
+  public async onNavigationCompleted(tabId: number, frameId: number): Promise<void> {
+    if (frameId === 0) {
+      this.clearPendingPageLoadFill(tabId);
+      await this.refreshCredentialsAndAutoFillIfNecessary(false, true, tabId);
+      return;
+    }
+
+    const pending = this.pendingPageLoadFills.get(tabId);
+    if (!pending) {
+      return;
+    }
+    if (pending.expiresAt <= Date.now()) {
+      this.clearPendingPageLoadFill(tabId);
+      return;
+    }
+
+    await this.fillWithCredential(tabId, pending.credential, true);
   }
 
   public async autoFillCurrentTabWithFirstMatch(): Promise<void> {
-
     const tab = await BackgroundManager.getCurrentTab();
 
     if (!tab || !tab.id) {
@@ -159,12 +164,39 @@ export class BackgroundManager {
   }
 
   public async fillWithCredential(tabId: number, credential: AutoFillCredential, onLoad = false) {
+    return this.autofillCoordinator.coordinate({
+      credential,
+      tabId,
+      trigger: onLoad ? 'page-load' : 'toolbar'
+    });
+  }
 
-    await browser.tabs.sendMessage(tabId, { credential: credential, onLoadFill: onLoad });
+  private rememberPageLoadFill(tabId: number, credential: AutoFillCredential): void {
+    this.clearPendingPageLoadFill(tabId);
+    const pending: PendingPageLoadFill = {
+      credential,
+      expirationTimer: null,
+      expiresAt: Date.now() + BackgroundManager.pageLoadFillWindowMs
+    };
+    pending.expirationTimer = setTimeout(() => {
+      if (this.pendingPageLoadFills.get(tabId) === pending) {
+        this.pendingPageLoadFills.delete(tabId);
+      }
+    }, BackgroundManager.pageLoadFillWindowMs);
+    this.pendingPageLoadFills.set(tabId, pending);
+  }
+
+  private clearPendingPageLoadFill(tabId: number): void {
+    const pending = this.pendingPageLoadFills.get(tabId);
+    if (pending) {
+      if (pending.expirationTimer !== null) {
+        clearTimeout(pending.expirationTimer);
+      }
+      this.pendingPageLoadFills.delete(tabId);
+    }
   }
 
   public async openCreateNewDialog(tabId: number) {
-
     await browser.tabs.sendMessage(tabId, { openCreateNewDialog: true });
   }
 
@@ -180,13 +212,6 @@ export class BackgroundManager {
     } else if (response.results.length <= 0) {
       return;
     }
-
-    
-    
-    
-    
-    
-    
 
     if (unlockedDatabaseCount == 0) {
       await IconManager.setIcon(IconState.allDatabasesLocked);
@@ -212,21 +237,13 @@ export class BackgroundManager {
   }
 
   private async createNewEntry(details: CreateEntryRequest): Promise<CreateEntryResponse | null> {
-    
-
     const response = await NativeAppApi.getInstance().createEntry(details);
-
-    
 
     return response;
   }
 
   private async getGroups(details: GetGroupsRequest): Promise<GetGroupsResponse | null> {
-    
-
     const response = await NativeAppApi.getInstance().getGroups(details);
-
-    
 
     return response;
   }
@@ -262,62 +279,39 @@ export class BackgroundManager {
   }
 
   private async getNewEntryDefaults(details: GetNewEntryDefaultsRequest): Promise<GetNewEntryDefaultsResponse | null> {
-    
-
     const response = await NativeAppApi.getInstance().getNewEntryDefaults(details);
-
-    
 
     return response;
   }
 
   private async getNewEntryDefaultsV2(details: GetNewEntryDefaultsRequest): Promise<GetNewEntryDefaultsResponseV2 | null> {
-    
-
     const response = await NativeAppApi.getInstance().getNewEntryDefaultsV2(details);
-
-    
 
     return response;
   }
 
   private async generatePassword(details: GeneratePasswordRequest): Promise<GeneratePasswordResponse | null> {
-    
-
     const response = await NativeAppApi.getInstance().generatePassword(details);
-
-    
 
     return response;
   }
 
   private async generatePasswordV2(): Promise<GeneratePasswordV2Response | null> {
-    
-
     const response = await NativeAppApi.getInstance().generatePasswordsV2();
-
-    
 
     return response;
   }
 
   private async getPasswordStrength(details: GetPasswordAndStrengthRequest): Promise<GetPasswordAndStrengthResponse | null> {
-    
-
     const response = await NativeAppApi.getInstance().getPasswordStrength(details);
-
-    
 
     return response;
   }
 
   private async getStatus(): Promise<GetStatusResponse | null> {
-    
-
-    await IconManager.setIcon(IconState.disconnected); 
+    await IconManager.setIcon(IconState.disconnected);
 
     const status = await NativeAppApi.getInstance().getStatus();
-    
 
     if (status) {
       const databases = status.databases;
@@ -326,8 +320,6 @@ export class BackgroundManager {
     }
 
     await this.updatePopupIconBasedOnStatus(status);
-
-    
 
     return status;
   }
@@ -341,32 +333,24 @@ export class BackgroundManager {
   }
 
   private async launchStrongbox(): Promise<boolean> {
-
     const response = await NativeAppApi.getInstance().launchStrongbox();
-
 
     return response;
   }
 
   private async copyField(credential: AutoFillCredential, field: WellKnownField, explicitTotp = false): Promise<CopyFieldResponse | null> {
-
     const response = await NativeAppApi.getInstance().copyField(credential.databaseId, credential.uuid, field, explicitTotp);
-
 
     return response;
   }
 
   public async onMessage(message: any, sender: any): Promise<any> {
-    
-    
-
     if (message.type === 'popup-request') {
       if (message.value == 'refresh-popup-icon') {
         this.updatePopupIconBasedOnStatus(message.status);
       }
     } else if (message.type === 'get-status') {
       const response = await this.getStatus();
-
 
       return response;
     } else if (message.type === 'register-iframe-channel') {
@@ -380,154 +364,98 @@ export class BackgroundManager {
     } else if (message.type === 'launch-strongbox') {
       const response = await this.launchStrongbox();
 
-
       return response;
     } else if (message.type === 'unlock-database') {
       return await this.unlockDatabase(message.details.uuid);
     } else if (message.type === 'get-groups') {
       const details = message.details;
 
-      
-
       const response = await this.getGroups(details);
-
-      
 
       return response;
     } else if (message.type === 'get-new-entry-defaults') {
       const details = message.details;
 
-      
-
       const response = await this.getNewEntryDefaults(details);
-
-      
 
       return response;
     } else if (message.type === 'get-new-entry-defaults-v2') {
       const details = message.details;
 
-      
-
       const response = await this.getNewEntryDefaultsV2(details);
-
-      
 
       return response;
     } else if (message.type === 'generate-password') {
       const details = message.details;
 
-      
-
       const response = await this.generatePassword(details);
-
-      
 
       return response;
     } else if (message.type === 'generate-password-v2') {
-      
-
       const response = await this.generatePasswordV2();
-
-      
 
       return response;
     } else if (message.type === 'get-password-strength') {
       const details = message.details;
 
-      
-
       const response = await this.getPasswordStrength(details);
-
-      
 
       return response;
     } else if (message.type === 'create-new-entry') {
       const details = message.details;
 
-      
-
       const response = await this.createNewEntry(details);
-
-      
 
       return response;
     } else if (message.type === 'copy-totp-after-fill') {
       const credential = message.details;
 
-      
-
       const response = await this.copyTotpCodeIfConfiguredAfterFill(credential);
-
-      
 
       return response;
     } else if (message.type === 'copy-username') {
       const credential = message.details;
 
-      
-
       const response = await this.copyField(credential, WellKnownField.username);
-
-      
 
       return response;
     } else if (message.type === 'copy-password') {
       const credential = message.details;
 
-      
-
       const response = await this.copyField(credential, WellKnownField.password);
-
-      
 
       return response;
     } else if (message.type === 'copy-totp') {
       const credential = message.details;
 
-      
-
       const response = await this.copyField(credential, WellKnownField.totp, true);
-
-      
 
       return response;
     } else if (message.type === 'get-tab-for-this-content-script') {
-      
-
       return sender.tab as browser.Tabs.Tab;
     } else if (message.type === 'get-credentials') {
-      
-
       const tab = sender.tab as browser.Tabs.Tab;
-      const url = tab?.url;
+      const senderUrl = typeof sender.url === 'string' ? sender.url : undefined;
+      const url = senderUrl && /^https?:\/\//i.test(senderUrl) ? senderUrl : tab?.url;
 
       if (url) {
         const { skip, take } = message.details;
 
         const credentials = await this.checkForCredentialsUrl(url, skip, take);
 
-        
-
         return credentials;
       } else {
         return [];
       }
     } else if (message.type === 'get-search') {
-      
-
       const { query, skip, take } = message.details;
 
       return await NativeAppApi.getInstance().search(query, skip, take);
     } else if (message.type === 'get-icon') {
-      
-
       const { databaseId, nodeId } = message.details;
 
       return await NativeAppApi.getInstance().getIcon(databaseId, nodeId);
     } else if (message.type === 'copy-string') {
-      
-
       const value = message.details;
 
       return await NativeAppApi.getInstance().copyString(value);

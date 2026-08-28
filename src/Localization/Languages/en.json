@@ -71,6 +71,13 @@
     "hide-on-this-page": "Inline Menus Hidden On This Page",
     "hide-on-this-domain": "Inline Menus Hidden On This Domain"
   },
+  "autofill-warning": {
+    "title": "Confirm autofill",
+    "origin-mismatch": "This login is saved for {{credentialOrigin}}, but the form is in {{frameOrigin}}. Only continue if you trust both sites.",
+    "new-password": "This field is marked as a new password. Fill the saved password into this field once?",
+    "unknown-origin": "another site",
+    "fill-once": "Fill once"
+  },
   "current-tab-credentials": {
     "title": "Matches",
     "autofill": "AutoFill",
@@ -115,6 +122,7 @@
     "title-tab2": "Fill",
     "title-tab3": "Inline Menu",
     "title-tab4": "Style",
+    "title-tab5": "Rules",
     "show-inline-menus": "Show Inline Menus",
     "show-match-count-badge-on-popup-icon": "Show Match Count Badge",
     "fill-on-load-if-only-single-match-found": "Fill on Load if Only Single Match",
@@ -129,6 +137,12 @@
     "appearance": "Appearance",
     "font-size": "Font Size",
     "spacing": "Spacing",
+    "rules-description": "Import or export versioned, exact-origin CSS selector rules for sites that generic autofill cannot classify.",
+    "rules-saved": "Autofill rules saved",
+    "rules-json": "Autofill rules JSON",
+    "rules-import": "Validate and save",
+    "rules-export": "Reload export",
+    "rules-delete": "Delete",
     "appearance-dark": "Dark",
     "appearance-light": "Light",
     "appearance-system": "System",

@@ -31,7 +31,7 @@ const resources = {
   ru: { global: global_ru },
   uk: { global: global_uk },
   nl: { global: global_nl },
-  pl: { global: global_pl },
+  pl: { global: global_pl }
 };
 
 export const languages = Object.keys(resources ?? []) as [string];
@@ -39,22 +39,18 @@ export const languages = Object.keys(resources ?? []) as [string];
 export const getSelectedlanguage = async () => {
   const stored = await SettingsStore.getSettings();
 
-  
   if (stored.lng) {
     return stored.lng;
   }
 
-  
   if (languages.includes(navigator.language)) {
     return navigator.language;
   }
 
-  
   if (languages.includes(navigator.language.split('-')[0])) {
     return navigator.language.split('-')[0];
   }
 
-  
   return languages[0];
 };
 
@@ -72,6 +68,7 @@ const isKnownLanguage = () => {
 
 export const config = {
   lng: await getSelectedlanguage(),
+  fallbackLng: 'en',
   resources,
-  interpolation: { escapeValue: false },
+  interpolation: { escapeValue: false }
 };

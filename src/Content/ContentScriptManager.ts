@@ -1,6 +1,5 @@
 import { AutoFillCredential } from '../Messaging/Protocol/AutoFillCredential';
 import { GetStatusResponse } from '../Messaging/Protocol/GetStatusResponse';
-import { AutoFiller } from './AutoFiller';
 import browser from 'webextension-polyfill';
 import { CreateEntryRequest } from '../Messaging/Protocol/CreateEntryRequest';
 import { CreateEntryResponse } from '../Messaging/Protocol/CreateEntryResponse';
@@ -13,7 +12,8 @@ import { GetNewEntryDefaultsResponse } from '../Messaging/Protocol/GetNewEntryDe
 import { GeneratePasswordRequest } from '../Messaging/Protocol/GeneratePasswordRequest';
 import { GeneratePasswordResponse } from '../Messaging/Protocol/GeneratePasswordResponse';
 import { UnlockResponse } from '../Messaging/Protocol/UnlockResponse';
-import { PageAnalyser } from './PageAnalyser';
+import { AutofillEngine, AutofillInspection, AutofillResult, AutofillTrigger } from './Autofill/AutofillEngine';
+import { autofillRulesStorageKey, createBrowserAutofillRuleStore } from './Autofill/BrowserAutofillRuleStorage';
 import { SettingsStore } from '../Settings/SettingsStore';
 import { LastKnownDatabasesItem, Settings } from '../Settings/Settings';
 import { IframeComponentTypes, IframeManager } from './Iframe/iframeManager';
@@ -31,6 +31,10 @@ export interface MainPageInformation {
   inlineMenuTruncatedHeight: string | null;
 }
 
+type CoordinatedAutofillInspection = AutofillInspection & {
+  pageLoadAttempted: boolean;
+};
+
 export class ContentScriptManager {
   pageLoadFillDone = false;
   reactRoot: ReactDOM.Root;
@@ -39,30 +43,29 @@ export class ContentScriptManager {
   iframeManager: IframeManager;
   hideInlineMenusForAWhile = false;
   showLargeTextView = false;
+  private readonly autofillEngine: AutofillEngine;
+  private readonly autofillRulesReady: Promise<void>;
+  private readonly autofillRuleStore = createBrowserAutofillRuleStore();
 
   constructor() {
     this.iframeManager = new IframeManager(this);
+    this.autofillEngine = new AutofillEngine(document);
+    this.autofillRulesReady = this.autofillRuleStore
+      .load()
+      .then(rules => this.autofillEngine.replaceRules(rules))
+      .catch(() => undefined);
+    browser.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && Object.prototype.hasOwnProperty.call(changes, autofillRulesStorageKey)) {
+        void this.autofillRuleStore
+          .load()
+          .then(rules => this.autofillEngine.replaceRules(rules))
+          .catch(() => undefined);
+      }
+    });
   }
 
   onDOMLoaded() {
-
     this.addFocusListener();
-    
-
-    
-    
-    
-
-    
-    
-    
-    
-
-    
-    
-    
-    
-    
 
     this.autoShowInlineMenuIfFocusedInputRecognized();
   }
@@ -70,39 +73,41 @@ export class ContentScriptManager {
   async getStatus(): Promise<GetStatusResponse | null> {
     const ret = await browser.runtime.sendMessage({ type: 'get-status' });
 
-    
-
     return ret;
   }
 
   async getCredentials(skip: number, take: number): Promise<AutoFillCredential[] | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-credentials', details: { skip, take } });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-credentials',
+      details: { skip, take }
+    });
 
     return ret;
   }
 
   async getIcon(databaseId: string, nodeId: string) {
-    const ret = await browser.runtime.sendMessage({ type: 'get-icon', details: { databaseId, nodeId } });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-icon',
+      details: { databaseId, nodeId }
+    });
 
     return ret;
   }
 
   async getSearchCredentials(query: string, skip: number, take: number): Promise<SearchResponse | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-search', details: { query, skip, take } });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-search',
+      details: { query, skip, take }
+    });
 
     return ret;
   }
 
   async getGroups(request: GetGroupsRequest): Promise<GetGroupsResponse | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-groups', details: request });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-groups',
+      details: request
+    });
 
     return ret;
   }
@@ -110,21 +115,28 @@ export class ContentScriptManager {
   async launchStrongbox() {
     const ret = await browser.runtime.sendMessage({ type: 'launch-strongbox' });
 
-    
-
     return ret;
   }
 
   async onCopyUsername(credential: AutoFillCredential) {
-    await browser.runtime.sendMessage({ type: 'copy-username', details: credential });
+    await browser.runtime.sendMessage({
+      type: 'copy-username',
+      details: credential
+    });
   }
 
   async onCopyPassword(credential: AutoFillCredential) {
-    await browser.runtime.sendMessage({ type: 'copy-password', details: credential });
+    await browser.runtime.sendMessage({
+      type: 'copy-password',
+      details: credential
+    });
   }
 
   async onCopyTotp(credential: AutoFillCredential) {
-    await browser.runtime.sendMessage({ type: 'copy-totp', details: credential });
+    await browser.runtime.sendMessage({
+      type: 'copy-totp',
+      details: credential
+    });
   }
 
   async onCopy(value: string) {
@@ -132,82 +144,89 @@ export class ContentScriptManager {
   }
 
   async onLaunchUrl(url: string) {
-    await browser.runtime.sendMessage({ type: 'content-script-requests-url-launch', details: url });
+    await browser.runtime.sendMessage({
+      type: 'content-script-requests-url-launch',
+      details: url
+    });
   }
 
   async unlockDatabase(uuid: string): Promise<UnlockResponse | null> {
     const ret = await browser.runtime.sendMessage({
       type: 'unlock-database',
       details: {
-        uuid: uuid,
-      },
+        uuid: uuid
+      }
     });
-
-    
 
     return ret;
   }
 
   async getNewEntryDefaults(request: GetNewEntryDefaultsRequest): Promise<GetNewEntryDefaultsResponse | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-new-entry-defaults', details: request });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-new-entry-defaults',
+      details: request
+    });
 
     return ret;
   }
 
   async getNewEntryDefaultsV2(request: GetNewEntryDefaultsRequest): Promise<GetNewEntryDefaultsResponseV2 | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-new-entry-defaults-v2', details: request });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-new-entry-defaults-v2',
+      details: request
+    });
 
     return ret;
   }
 
   async generatePassword(request: GeneratePasswordRequest): Promise<GeneratePasswordResponse | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'generate-password', details: request });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'generate-password',
+      details: request
+    });
 
     return ret;
   }
 
   async generatePasswordV2(): Promise<GeneratePasswordV2Response | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'generate-password-v2' });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'generate-password-v2'
+    });
 
     return ret;
   }
 
   async getPasswordStrength(request: GetPasswordAndStrengthRequest): Promise<GetPasswordAndStrengthResponse | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-password-strength', details: request });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-password-strength',
+      details: request
+    });
 
     return ret;
   }
 
   async createNewEntry(details: CreateEntryRequest): Promise<CreateEntryResponse | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'create-new-entry', details: details });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'create-new-entry',
+      details: details
+    });
 
     return ret;
   }
 
   async copyTotpCodeIfConfiguredAfterFill(details: AutoFillCredential): Promise<void> {
-    const ret = await browser.runtime.sendMessage({ type: 'copy-totp-after-fill', details: details });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'copy-totp-after-fill',
+      details: details
+    });
 
     return ret;
   }
 
   async getCurrentTab(): Promise<browser.Tabs.Tab | null> {
-    const ret = await browser.runtime.sendMessage({ type: 'get-tab-for-this-content-script' });
-
-    
+    const ret = await browser.runtime.sendMessage({
+      type: 'get-tab-for-this-content-script'
+    });
 
     return ret;
   }
@@ -229,8 +248,6 @@ export class ContentScriptManager {
   }
 
   async getFavIconBase64Data(url: string): Promise<string | null> {
-    
-
     const testImg = document.createElement('img') as HTMLImageElement;
     if (testImg === null) {
       return null;
@@ -247,19 +264,11 @@ export class ContentScriptManager {
     const imageData = Utils.getImageElementBase64PNGData(testImg);
 
     if (imageData && imageData?.length > 20 * 1024) {
-      
-      
       return null;
     }
 
-    
-    
-    
-
     const chromeDefaultFavIconHash = -1499456902;
     if (imageData == null || testImg.naturalHeight === 0) {
-      
-      
       return null;
     } else if (Utils.quickHashString(imageData) === chromeDefaultFavIconHash) {
       return null;
@@ -283,8 +292,6 @@ export class ContentScriptManager {
   handleSaveNewEntry(details: CreateEntryRequest) {
     return this.createNewEntry(details);
   }
-
-  
 
   async getLastKnownAutoFillDatabases(): Promise<LastKnownDatabasesItem[]> {
     const stored = await SettingsStore.getSettings();
@@ -318,19 +325,15 @@ export class ContentScriptManager {
     return true;
   }
 
-  
-
-  listen = false; 
+  listen = false;
   focusOrBlurListener: EventListener = event => this.onFocusChanged(event);
   addFocusListener() {
-    
     this.listen = true;
     document.addEventListener('focus', this.focusOrBlurListener, true);
     document.addEventListener('blur', this.focusOrBlurListener, true);
   }
 
   removeFocusListener() {
-    
     this.listen = false;
     document.removeEventListener('focus', this.focusOrBlurListener, true);
     document.removeEventListener('blur', this.focusOrBlurListener, true);
@@ -338,7 +341,6 @@ export class ContentScriptManager {
 
   timeout: NodeJS.Timeout | null;
   clearBlurTimeout() {
-    
     if (this.timeout) {
       clearTimeout(this.timeout);
       this.timeout = null;
@@ -349,18 +351,12 @@ export class ContentScriptManager {
     this.currentInlineMenuInputElement = null;
 
     if (!this.listen) {
-      
       return;
     }
-
-    
-
-    
 
     this.clearBlurTimeout();
 
     if (event.type === 'blur') {
-      
       this.timeout = setTimeout(() => {
         this.autoShowInlineMenuIfFocusedInputRecognized();
         this.timeout = null;
@@ -370,9 +366,8 @@ export class ContentScriptManager {
     }
   }
 
-  
-
   async autoShowInlineMenuIfFocusedInputRecognized() {
+    await this.autofillRulesReady;
     if (document.activeElement && document.activeElement instanceof HTMLInputElement) {
       const focusedElement = document.activeElement as HTMLInputElement;
 
@@ -381,13 +376,11 @@ export class ContentScriptManager {
         return;
       }
 
-      const usernames = await PageAnalyser.getAllUsernameInputs();
-      const isRecognizedUsernameField = usernames.some(input => input == focusedElement);
-      const passwords = await PageAnalyser.getAllPasswordInputs();
-      const isRecognizedPasswordField = passwords.some(input => input == focusedElement);
+      const inspection = await this.autofillEngine.inspect(focusedElement);
+      const isRecognizedUsernameField = inspection.focusedRole === 'username';
+      const isRecognizedPasswordField = inspection.focusedRole === 'current-password';
 
       if (isRecognizedUsernameField || isRecognizedPasswordField) {
-
         this.currentInlineMenuInputElement = focusedElement;
 
         this.showInlineMenuOnInputElement(focusedElement, isRecognizedPasswordField);
@@ -398,6 +391,7 @@ export class ContentScriptManager {
   }
 
   async forceShowInlineMenuOnCurrentInput() {
+    await this.autofillRulesReady;
     if (!Utils.isMacintosh()) {
       return false;
     }
@@ -407,8 +401,8 @@ export class ContentScriptManager {
 
       this.currentInlineMenuInputElement = focusedElement;
 
-      const passwords = await PageAnalyser.getAllPasswordInputs();
-      const isLikelyPasswordField = passwords.some(input => input == focusedElement) || focusedElement.type === 'password';
+      const inspection = await this.autofillEngine.inspect(focusedElement);
+      const isLikelyPasswordField = inspection.focusedRole === 'current-password' || inspection.focusedRole === 'new-password' || focusedElement.type === 'password';
 
       await this.showInlineMenuOnInputElement(focusedElement, isLikelyPasswordField);
     } else {
@@ -416,7 +410,6 @@ export class ContentScriptManager {
   }
 
   async showInlineMenuOnInputElement(fieldElement: HTMLInputElement, isPasswordField: boolean) {
-    
     const status = await this.getStatus();
 
     if (status == null) {
@@ -446,52 +439,89 @@ export class ContentScriptManager {
     credential: AutoFillCredential,
     isPageLoadFill = false,
     inlineFieldInitiator: HTMLInputElement | null = null,
-    inlineFieldInitiatorIsPassword = false,
-    fillMultiple = false
-  ): Promise<boolean> {
+    inlineFieldInitiatorIsPassword = false
+  ): Promise<AutofillResult> {
+    await this.autofillRulesReady;
 
     if (isPageLoadFill) {
-
       const settings = await SettingsStore.getSettings();
       if (Settings.isUrlInDoNotFillList(settings, document.location.href)) {
-        return false;
+        return {
+          passwordSatisfied: 0,
+          reasons: ['disabled-for-site'],
+          status: 'blocked',
+          usernameSatisfied: 0
+        };
       }
 
       if (this.pageLoadFillDone) {
-        return false;
+        return {
+          passwordSatisfied: 0,
+          reasons: ['page-load-already-attempted'],
+          status: 'blocked',
+          usernameSatisfied: 0
+        };
       }
 
       this.pageLoadFillDone = true;
     }
 
-    
-
     this.removeFocusListener();
 
-    const autoFiller = new AutoFiller();
-    const filled = await autoFiller.doIt(credential, inlineFieldInitiator, inlineFieldInitiatorIsPassword, fillMultiple);
+    const trigger: AutofillTrigger = isPageLoadFill ? 'page-load' : inlineFieldInitiator ? 'inline' : 'toolbar';
+    if (trigger === 'inline' && this.isCrossOriginFrame()) {
+      const credentialOrigin = this.safeOrigin(credential.url);
+      const frameOrigin = this.safeOrigin(document.location.href);
+      if (credentialOrigin !== frameOrigin) {
+        const confirmed = await this.iframeManager.confirmAutofillWarning({
+          credentialOrigin,
+          frameOrigin,
+          kind: 'origin-mismatch'
+        });
+        if (!confirmed) {
+          this.addFocusListener();
+          return {
+            passwordSatisfied: 0,
+            reasons: ['untrusted-frame'],
+            status: 'blocked',
+            usernameSatisfied: 0
+          };
+        }
+      }
+    }
+    const allowNewPassword =
+      trigger === 'inline' && inlineFieldInitiatorIsPassword && (await this.autofillEngine.inspect(inlineFieldInitiator)).focusedRole === 'new-password'
+        ? await this.iframeManager.confirmAutofillWarning({
+            kind: 'new-password'
+          })
+        : false;
+    const filled = await this.autofillEngine.fill({
+      allowNewPassword,
+      credential,
+      initiator: inlineFieldInitiator,
+      trigger
+    });
 
     setTimeout(() => {
       this.addFocusListener();
     }, 500);
 
-    if (filled) {
+    if (filled.usernameSatisfied + filled.passwordSatisfied > 0) {
       this.iframeManager.remove();
-      this.copyTotpCodeIfConfiguredAfterFill(credential);
+      if (filled.status === 'complete' && filled.passwordSatisfied > 0) {
+        this.copyTotpCodeIfConfiguredAfterFill(credential);
+      }
     }
 
     return filled;
   }
 
   async autoFillSingleField(text: string, inlineFieldInitiator: HTMLInputElement, appendValue = false): Promise<void> {
-
-    
+    await this.autofillRulesReady;
 
     this.removeFocusListener();
 
-    const autoFiller = new AutoFiller();
-
-    await autoFiller.doItSingleField(text, inlineFieldInitiator, appendValue);
+    this.autofillEngine.fillSingleField(inlineFieldInitiator, text, appendValue);
 
     setTimeout(() => {
       this.addFocusListener();
@@ -499,6 +529,57 @@ export class ContentScriptManager {
 
     if (!appendValue) {
       this.iframeManager.remove();
+    }
+  }
+
+  async inspectAutofill(trigger?: 'page-load' | 'toolbar'): Promise<CoordinatedAutofillInspection> {
+    await this.autofillRulesReady;
+    const activeElement = document.activeElement instanceof HTMLInputElement ? document.activeElement : null;
+    const inspection = await this.autofillEngine.inspect(activeElement);
+    return {
+      ...inspection,
+      candidateCount: trigger === 'page-load' && this.pageLoadFillDone ? 0 : inspection.candidateCount,
+      pageLoadAttempted: this.pageLoadFillDone
+    };
+  }
+
+  async fillCoordinated(credential: AutoFillCredential, trigger: 'page-load' | 'toolbar', expectedFrameUrl: string, expectedRevision: number): Promise<AutofillResult> {
+    const inspection = await this.autofillEngine.inspect();
+    if (inspection.frameUrl !== expectedFrameUrl || inspection.revision !== expectedRevision) {
+      return {
+        passwordSatisfied: 0,
+        reasons: ['stale-frame'],
+        status: 'blocked',
+        usernameSatisfied: 0
+      };
+    }
+    return this.autoFillWithCredential(credential, trigger === 'page-load');
+  }
+
+  confirmOriginMismatch(credentialOrigin: string, frameOrigin: string): Promise<boolean> {
+    return this.iframeManager.confirmAutofillWarning({
+      credentialOrigin,
+      frameOrigin,
+      kind: 'origin-mismatch'
+    });
+  }
+
+  private isCrossOriginFrame(): boolean {
+    if (window.top === window) {
+      return false;
+    }
+    try {
+      return window.top?.location.origin !== window.location.origin;
+    } catch {
+      return true;
+    }
+  }
+
+  private safeOrigin(url: string): string {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return 'unknown';
     }
   }
 }

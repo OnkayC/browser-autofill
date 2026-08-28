@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Strongbox AutoFill (Onkay Fork)",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "icons": {
     "128": "assets/icons/app-icon-blue-128.png"
   },
@@ -16,20 +16,14 @@
   ],
   "author": "Onkay",
   "background": {
-    "scripts": [
-      "js/background.bundle.js"
-    ]
+    "scripts": ["js/background.bundle.js"]
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "{1af7308a-5616-4c0d-a14f-14c69f4e0bcd}",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": [
-          "authenticationInfo",
-          "browsingActivity",
-          "websiteContent"
-        ]
+        "required": ["authenticationInfo", "browsingActivity", "websiteContent"]
       }
     }
   },
@@ -41,9 +35,7 @@
     "default_title": "Strongbox Onkay",
     "default_popup": "popup.html"
   },
-  "web_accessible_resources": [
-    "assets/icons/app-icon-circle.png"
-  ],
+  "web_accessible_resources": ["assets/icons/app-icon-circle.png"],
   "commands": {
     "autofill-first": {
       "suggested_key": {
@@ -61,16 +53,10 @@
   "content_scripts": [
     {
       "all_frames": true,
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "js/content.bundle.js"
-      ],
-      "css": [
-        "content.css"
-      ]
+      "match_about_blank": true,
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["js/content.bundle.js"],
+      "css": ["content.css"]
     }
   ]
 }

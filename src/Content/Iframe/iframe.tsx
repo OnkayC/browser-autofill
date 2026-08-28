@@ -11,14 +11,12 @@ import { ContentScriptManager, MainPageInformation } from '../ContentScriptManag
 import { IframeMessageTypes, IframeComponentTypes } from './iframeManager';
 import { connectIframeParentChannel, postToIframeParent } from './IframeParentChannel';
 
-
 import CreateNewEntryDialog from '../CreateNewEntryDialog';
 import NotificationToast from '../NotificationToast';
 import InlineMiniFieldMenu from '../InlineMiniFieldMenu';
-
+import AutofillWarningDialog, { AutofillWarningData } from '../AutofillWarningDialog';
 
 import { CustomStyleProvider, useCustomStyle } from '../../Contexts/CustomStyleContext';
-
 
 import i18next from 'i18next';
 import { I18nextProvider } from 'react-i18next';
@@ -32,8 +30,11 @@ const root: Root = createRoot(iframeRoot);
 
 const emotionRoot = document.createElement('style');
 document.head.appendChild(emotionRoot);
-const cache = createCache({ key: 'css', prepend: true, container: emotionRoot });
-
+const cache = createCache({
+  key: 'css',
+  prepend: true,
+  container: emotionRoot
+});
 
 function StyleWrapper({ children }: { children: React.ReactNode }) {
   const { getCustomStyle } = useCustomStyle();
@@ -47,11 +48,9 @@ function StyleWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
-async function render(iframeComponentType: IframeComponentTypes, data: MainPageInformation | string) {
-  
+async function render(iframeComponentType: IframeComponentTypes, data: MainPageInformation | string | AutofillWarningData) {
   i18next.init(config);
 
-  
   const component = await build(iframeComponentType, data);
 
   root.render(
@@ -62,13 +61,12 @@ async function render(iframeComponentType: IframeComponentTypes, data: MainPageI
     </I18nextProvider>
   );
 
-  
   setTimeout(() => {
     resize();
   }, 50);
 }
 
-async function build(iframeComponentType: IframeComponentTypes, data: MainPageInformation | string) {
+async function build(iframeComponentType: IframeComponentTypes, data: MainPageInformation | string | AutofillWarningData) {
   switch (iframeComponentType) {
     case IframeComponentTypes.InlineMiniFieldMenu:
       return await buildInlineMiniFieldMenu(data as MainPageInformation);
@@ -76,7 +74,17 @@ async function build(iframeComponentType: IframeComponentTypes, data: MainPageIn
       return await buildCreateNewEntryDialog(data as MainPageInformation);
     case IframeComponentTypes.NotificationToast:
       return await buildNotificationToast(data as string);
+    case IframeComponentTypes.AutofillWarning:
+      return buildAutofillWarning(data as AutofillWarningData);
   }
+}
+
+function buildAutofillWarning(data: AutofillWarningData) {
+  return React.createElement(AutofillWarningDialog, {
+    data,
+    onCancel: () => postToIframeParent({ type: IframeMessageTypes.cancelAutofillWarning }),
+    onConfirm: () => postToIframeParent({ type: IframeMessageTypes.confirmAutofillWarning })
+  });
 }
 
 async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation) {
@@ -88,7 +96,7 @@ async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation
 
   const unlockableDatabases = await contentScriptManager.getUnlockableDatabases(status);
 
-  const credentials = status == null ? [] : (await contentScriptManager.getCredentials(0, nativeAppApi.credentialResultsPageSize)) ?? [];
+  const credentials = status == null ? [] : ((await contentScriptManager.getCredentials(0, nativeAppApi.credentialResultsPageSize)) ?? []);
 
   const menuComponent = React.createElement(InlineMiniFieldMenu, {
     status,
@@ -102,17 +110,26 @@ async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation
       return (await contentScriptManager.getCredentials(skip, take)) ?? [];
     },
     onCreateNewEntry: () => {
-      postToIframeParent({ type: IframeMessageTypes.showCreateNewEntryDialog, data: mainPageInformation });
+      postToIframeParent({
+        type: IframeMessageTypes.showCreateNewEntryDialog,
+        data: mainPageInformation
+      });
     },
     onUnlockDatabase: async (databaseUuid: string) => {
       const unlockResponse = await contentScriptManager.unlockDatabase(databaseUuid);
       return unlockResponse;
     },
     onFillWithCredential: async credential => {
-      postToIframeParent({ type: IframeMessageTypes.onFillWithCredential, data: credential });
+      postToIframeParent({
+        type: IframeMessageTypes.onFillWithCredential,
+        data: credential
+      });
     },
     onFillSingleField: async (text, appendValue) => {
-      postToIframeParent({ type: IframeMessageTypes.onFillSingleField, data: { text, appendValue } });
+      postToIframeParent({
+        type: IframeMessageTypes.onFillSingleField,
+        data: { text, appendValue }
+      });
     },
     onCopyUsername: credential => {
       contentScriptManager.onCopyUsername(credential);
@@ -131,7 +148,9 @@ async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation
       postToIframeParent({ type: IframeMessageTypes.onRedirectUrl, data: url });
     },
     refreshInlineMenu: async () => {
-      postToIframeParent({ type: IframeMessageTypes.backToInlineMiniFieldMenu });
+      postToIframeParent({
+        type: IframeMessageTypes.backToInlineMiniFieldMenu
+      });
     },
     beforeOpenSubMenu: (showDetails = false, restoreIframeSize = false) => {
       if (restoreIframeSize) {
@@ -139,13 +158,11 @@ async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation
         return;
       }
 
-      
-      
       if (showDetails) {
         resize(330, 220);
       } else {
         if (iframeRoot.offsetHeight < 180) {
-          resize(undefined, 120); 
+          resize(undefined, 120);
         }
       }
     },
@@ -156,7 +173,10 @@ async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation
       postToIframeParent({ type: IframeMessageTypes.showLargeTextView });
     },
     notifyAction: message => {
-      postToIframeParent({ type: IframeMessageTypes.showNotificationToast, data: message });
+      postToIframeParent({
+        type: IframeMessageTypes.showNotificationToast,
+        data: message
+      });
     },
     searchCredentials: async (query: string, skip: number, take: number) => {
       return await contentScriptManager.getSearchCredentials(query, skip, take);
@@ -164,7 +184,7 @@ async function buildInlineMiniFieldMenu(mainPageInformation: MainPageInformation
     getIcon: async (databaseId: string, nodeId: string) => {
       return await contentScriptManager.getIcon(databaseId, nodeId);
     },
-    resize,
+    resize
   });
 
   return menuComponent;
@@ -201,9 +221,12 @@ async function buildCreateNewEntryDialog({ title, url, favIconBase64, favIconUrl
       return response;
     },
     onCreatedItem: (credential, message) => {
-      postToIframeParent({ type: IframeMessageTypes.onCreatedNewItem, data: { credential, message } });
+      postToIframeParent({
+        type: IframeMessageTypes.onCreatedNewItem,
+        data: { credential, message }
+      });
     },
-    key: Utils.getUUIDString(), 
+    key: Utils.getUUIDString(),
     unlockDatabase: async uuid => {
       const response = await contentScriptManager.unlockDatabase(uuid);
       return response;
@@ -212,8 +235,11 @@ async function buildCreateNewEntryDialog({ title, url, favIconBase64, favIconUrl
       postToIframeParent({ type: IframeMessageTypes.remove });
     },
     notifyAction: message => {
-      postToIframeParent({ type: IframeMessageTypes.showNotificationToast, data: message });
-    },
+      postToIframeParent({
+        type: IframeMessageTypes.showNotificationToast,
+        data: message
+      });
+    }
   });
 
   return createNewEntryDialog;
@@ -224,22 +250,21 @@ async function buildNotificationToast(message: string) {
     message,
     handleClose: () => {
       postToIframeParent({ type: IframeMessageTypes.remove });
-    },
+    }
   });
 
   return snackbar;
 }
 
 function resize(extraWidth = defaultIFrameExtraWidth, extraHeight = defaultIFrameExtraHeight) {
-  
   const children = iframeRoot.children[0] as HTMLElement;
   if (children) {
     postToIframeParent({
       type: IframeMessageTypes.resize,
       data: {
         width: `${children.offsetWidth + extraWidth}px`,
-        height: `${children.offsetHeight + extraHeight}px`,
-      },
+        height: `${children.offsetHeight + extraHeight}px`
+      }
     });
   }
 }
@@ -247,7 +272,7 @@ function resize(extraWidth = defaultIFrameExtraWidth, extraHeight = defaultIFram
 function onIFrameKeyup(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     postToIframeParent({
-      type: IframeMessageTypes.remove,
+      type: IframeMessageTypes.remove
     });
   } else if (event.key === 'ArrowLeft') {
     const focusableElements = document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
@@ -307,7 +332,10 @@ async function onMessageReceivedFromMainPage(event: MessageEvent) {
 
   let channelClaimed = false;
   try {
-    channelClaimed = await browser.runtime.sendMessage({ type: 'claim-iframe-channel', details: { token: channelToken } });
+    channelClaimed = await browser.runtime.sendMessage({
+      type: 'claim-iframe-channel',
+      details: { token: channelToken }
+    });
   } catch {
     rejectChannel();
     return;
@@ -337,11 +365,15 @@ async function onMessageReceivedFromMainPage(event: MessageEvent) {
       await render(iframeComponentType, message);
       break;
     }
+    case IframeComponentTypes.AutofillWarning: {
+      const warning = event.data.data.warning as AutofillWarningData;
+      await render(iframeComponentType, warning);
+      break;
+    }
     default:
       break;
   }
 }
-
 
 window.addEventListener('message', onMessageReceivedFromMainPage);
 

@@ -1,11 +1,13 @@
 import browser from 'webextension-polyfill';
 import { ContentScriptManager, MainPageInformation } from '../ContentScriptManager';
 import { SettingsStore } from '../../Settings/SettingsStore';
+import type { AutofillWarningData } from '../AutofillWarningDialog';
 
 export enum IframeComponentTypes {
   InlineMiniFieldMenu,
   CreateNewEntryDialog,
-  NotificationToast
+  NotificationToast,
+  AutofillWarning
 }
 
 export enum IframeMessageTypes {
@@ -22,7 +24,9 @@ export enum IframeMessageTypes {
   colorSchemeChanged,
   onRedirectUrl,
   onCopy,
-  showLargeTextView
+  showLargeTextView,
+  confirmAutofillWarning,
+  cancelAutofillWarning
 }
 
 export class IframeManager {
@@ -33,6 +37,8 @@ export class IframeManager {
   isPasswordField: boolean;
   areMainPageEventListenersAdded = false;
   notificationToastMessage = '';
+  autofillWarningData: AutofillWarningData | null = null;
+  private autofillWarningResolver: ((confirmed: boolean) => void) | null = null;
   private iframeMessageChannel: MessageChannel | null = null;
   private creationGeneration = 0;
 
@@ -50,15 +56,21 @@ export class IframeManager {
     const generation = this.creationGeneration;
 
     requestAnimationFrame(() => {
-      void this.create(generation).catch(() => {
-        if (generation === this.creationGeneration) {
-          this.remove();
-        }
-      });
+      void this.create(generation)
+        .then(created => {
+          if (!created && generation === this.creationGeneration) {
+            this.remove();
+          }
+        })
+        .catch(() => {
+          if (generation === this.creationGeneration) {
+            this.remove();
+          }
+        });
     });
   }
 
-  private async create(generation: number) {
+  private async create(generation: number): Promise<boolean> {
     const channelToken = this.createChannelToken();
     const channelRegistered = await browser.runtime.sendMessage({
       type: 'register-iframe-channel',
@@ -66,12 +78,12 @@ export class IframeManager {
     });
 
     if (!channelRegistered || generation !== this.creationGeneration) {
-      return;
+      return false;
     }
 
     const existRoot = document.querySelector('com-strongbox-extension');
     if (existRoot) {
-      return;
+      return false;
     }
 
     const mainRoot = document.createElement('com-strongbox-extension');
@@ -158,6 +170,16 @@ export class IframeManager {
           this.contentScriptManager.showLargeTextView = true;
           break;
         }
+        case IframeMessageTypes.confirmAutofillWarning: {
+          this.resolveAutofillWarning(true);
+          this.remove();
+          break;
+        }
+        case IframeMessageTypes.cancelAutofillWarning: {
+          this.resolveAutofillWarning(false);
+          this.remove();
+          break;
+        }
         case IframeMessageTypes.colorSchemeChanged: {
           this.iframe.style.colorScheme = event.data.data;
           break;
@@ -180,7 +202,7 @@ export class IframeManager {
     const messageChannel = new MessageChannel();
     let channelTransferred = false;
     this.iframeMessageChannel = messageChannel;
-    messageChannel.port1.addEventListener('message', (event) => {
+    messageChannel.port1.addEventListener('message', event => {
       void handleMessageReceivedFromIFrame(event);
     });
     messageChannel.port1.start();
@@ -267,6 +289,21 @@ export class IframeManager {
           );
           break;
         }
+        case IframeComponentTypes.AutofillWarning: {
+          this.iframe.contentWindow?.postMessage(
+            {
+              type: IframeMessageTypes.render,
+              data: {
+                iframeComponentType: this.iframeComponentType,
+                warning: this.autofillWarningData,
+                channelToken
+              }
+            },
+            targetOrigin,
+            [messageChannel.port2]
+          );
+          break;
+        }
         default:
           break;
       }
@@ -283,6 +320,7 @@ export class IframeManager {
       window.addEventListener('keyup', onMainPageKeyup);
       this.areMainPageEventListenersAdded = true;
     }
+    return true;
   }
 
   restoreFocus() {
@@ -292,6 +330,7 @@ export class IframeManager {
   }
 
   remove() {
+    this.resolveAutofillWarning(false);
     this.creationGeneration += 1;
     this.iframeMessageChannel?.port1.close();
     this.iframeMessageChannel?.port2.close();
@@ -301,9 +340,24 @@ export class IframeManager {
     existRoot?.remove();
   }
 
+  confirmAutofillWarning(data: AutofillWarningData): Promise<boolean> {
+    this.resolveAutofillWarning(false);
+    this.autofillWarningData = data;
+    this.initialize(IframeComponentTypes.AutofillWarning, document.body as HTMLInputElement);
+    return new Promise(resolve => {
+      this.autofillWarningResolver = resolve;
+    });
+  }
+
+  private resolveAutofillWarning(confirmed: boolean): void {
+    const resolve = this.autofillWarningResolver;
+    this.autofillWarningResolver = null;
+    resolve?.(confirmed);
+  }
+
   private createChannelToken(): string {
     const bytes = crypto.getRandomValues(new Uint8Array(32));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
   private defineStyle() {
@@ -341,6 +395,13 @@ export class IframeManager {
       }
       case IframeComponentTypes.NotificationToast: {
         this.iframe.style.bottom = '0';
+        break;
+      }
+      case IframeComponentTypes.AutofillWarning: {
+        this.iframe.style.top = '0';
+        this.iframe.style.left = '0';
+        this.iframe.style.width = '100%';
+        this.iframe.style.height = '100%';
         break;
       }
       default:
