@@ -278,6 +278,42 @@ test('does not treat a newsletter email field as a username-only login', async (
   engine.dispose();
 });
 
+test('inline fill ignores a hidden password decoy beside a username-only login step', async () => {
+  const { AutofillEngine } = loadTypeScriptModule('../src/Content/Autofill/AutofillEngine.ts');
+  const dom = new JSDOM(
+    `
+      <main>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username webauthn">
+        <input name="autofill-password" type="password" style="display: none">
+      </main>
+    `,
+    { url: 'https://www.dropbox.com/login' }
+  );
+  makeInputsVisible(dom.window.document);
+  const email = dom.window.document.querySelector('#email');
+  const engine = new AutofillEngine(dom.window.document);
+
+  const result = await engine.fill({
+    credential: {
+      username: 'person@example.test',
+      password: 'secret',
+      url: 'https://www.dropbox.com/'
+    },
+    initiator: email,
+    trigger: 'inline'
+  });
+
+  assert.equal(email.value, 'person@example.test');
+  assert.deepEqual(result, {
+    passwordSatisfied: 0,
+    reasons: [],
+    status: 'complete',
+    usernameSatisfied: 1
+  });
+  engine.dispose();
+});
+
 test('page-load fills matched pairs in every form without filling search or OTP fields', async () => {
   const { AutofillEngine } = loadTypeScriptModule('../src/Content/Autofill/AutofillEngine.ts');
   const dom = new JSDOM(

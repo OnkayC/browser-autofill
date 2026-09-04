@@ -310,7 +310,7 @@ export class AutofillEngine {
       }
     }
 
-    const ownersWithPasswords = new Set(fields.filter(field => field.element.type === 'password').map(field => field.logicalOwner));
+    const ownersWithPasswords = new Set(fields.filter(field => this.isPasswordCandidate(field)).map(field => field.logicalOwner));
     for (const field of fields) {
       if (!this.isUsernameCandidate(field) || ownersWithPasswords.has(field.logicalOwner)) {
         continue;
